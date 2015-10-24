@@ -112,12 +112,25 @@ func (m TileDb) RequestQueue() chan<- TileFetchRequest {
 // Best executed in a dedicated go routine.
 func (m *TileDb) Run() {
 	m.qc = make(chan bool)
+	requestClosed := false
+	insertClosed := false
 	for {
 		select {
-		case r := <-m.requestChan:
-			m.fetch(r)
-		case i := <-m.insertChan:
-			m.insert(i)
+		case r, ok := <-m.requestChan:
+			if !ok {
+				requestClosed = true
+			} else {
+				m.fetch(r)
+			}
+		case i, ok := <-m.insertChan:
+			if !ok {
+				insertClosed = true
+			} else {
+				m.insert(i)
+			}
+		}
+		if requestClosed && insertClosed {
+			break
 		}
 	}
 	m.qc <- true
