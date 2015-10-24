@@ -2,28 +2,45 @@ package maptiles
 
 import (
 	"log"
+	"runtime"
 )
 
 type LayerMultiplex struct {
-	layerChans map[string]chan<- TileFetchRequest
+	layerChans   map[string]chan<- TileFetchRequest
+	numRenderers int
 }
 
-func NewLayerMultiplex() *LayerMultiplex {
-	l := LayerMultiplex{}
-	l.layerChans = make(map[string]chan<- TileFetchRequest)
+func NewLayerMultiplex(numRenderers int) *LayerMultiplex {
+	if numRenderers == 0 {
+		numRenderers = runtime.GOMAXPROCS(0)
+	}
+	l := LayerMultiplex{
+		layerChans:   make(map[string]chan<- TileFetchRequest),
+		numRenderers: numRenderers,
+	}
 	return &l
 }
 
-func DefaultRenderMultiplex(defaultStylesheet string) *LayerMultiplex {
-	l := NewLayerMultiplex()
-	c := NewTileRendererChan(defaultStylesheet)
-	l.layerChans[""] = c
-	l.layerChans["default"] = c
+func DefaultRenderMultiplex(defaultStylesheet string, numRenderers int) *LayerMultiplex {
+	l := NewLayerMultiplex(numRenderers)
+	renderer := l.CreateRenderer(defaultStylesheet)
+	l.AddSource("", renderer)
+	l.AddSource("default", renderer)
 	return l
 }
 
+func (l *LayerMultiplex) CreateRenderer(stylesheet string) chan<- TileFetchRequest {
+	c := make(chan TileFetchRequest)
+	for i := 0; i < l.numRenderers; i++ {
+		renderer := NewTileRenderer(stylesheet)
+		go renderer.Listen(c)
+	}
+
+	return c
+}
+
 func (l *LayerMultiplex) AddRenderer(name string, stylesheet string) {
-	l.layerChans[name] = NewTileRendererChan(stylesheet)
+	l.AddSource(name, l.CreateRenderer(stylesheet))
 }
 
 func (l *LayerMultiplex) AddSource(name string, fetchChan chan<- TileFetchRequest) {

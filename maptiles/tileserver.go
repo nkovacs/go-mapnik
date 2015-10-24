@@ -17,10 +17,24 @@ type TileServer struct {
 	TmsSchema bool
 }
 
-func NewTileServer(cacheFile string) *TileServer {
+// TileServerConfig
+type TileServerConfig struct {
+	// CacheFile is the mbtiles file to use for caching.
+	// An empty string disables caching.
+	CacheFile string
+
+	// NumRenderers specified the number of renderers to start for each layer.
+	// If zero, runtime.GOMAXPROCS will be used.
+	NumRenderers int
+}
+
+// NewTileServer creates a new tile server
+func NewTileServer(cfg TileServerConfig) *TileServer {
 	t := TileServer{}
-	t.lmp = NewLayerMultiplex()
-	t.m = NewTileDb(cacheFile)
+	t.lmp = NewLayerMultiplex(cfg.NumRenderers)
+	if cfg.CacheFile != "" {
+		t.m = NewTileDb(cfg.CacheFile)
+	}
 
 	return &t
 }
@@ -35,12 +49,15 @@ func (t *TileServer) ServeTileRequest(w http.ResponseWriter, r *http.Request, tc
 	ch := make(chan TileFetchResult)
 
 	tr := TileFetchRequest{tc, ch}
-	t.m.RequestQueue() <- tr
+	var result TileFetchResult
 
-	result := <-ch
+	if t.m != nil {
+		t.m.RequestQueue() <- tr
+		result = <-ch
+	}
 	needsInsert := false
 
-	if result.BlobPNG == nil {
+	if t.m == nil || result.BlobPNG == nil {
 		// Tile was not provided by DB, so submit the tile request to the renderer
 		t.lmp.SubmitRequest(tr)
 		result = <-ch
@@ -57,7 +74,7 @@ func (t *TileServer) ServeTileRequest(w http.ResponseWriter, r *http.Request, tc
 	if err != nil {
 		log.Println(err)
 	}
-	if needsInsert {
+	if t.m != nil && needsInsert {
 		t.m.InsertQueue() <- result // insert newly rendered tile into cache db
 	}
 }

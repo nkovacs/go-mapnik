@@ -38,26 +38,43 @@ func NewTileRendererChan(stylesheet string) chan<- TileFetchRequest {
 	c := make(chan TileFetchRequest)
 
 	go func(requestChan <-chan TileFetchRequest) {
-		var err error
 		t := NewTileRenderer(stylesheet)
 		for request := range requestChan {
-			result := TileFetchResult{request.Coord, nil}
-			result.BlobPNG, err = t.RenderTile(request.Coord)
-			if err != nil {
-				log.Println("Error while rendering", request.Coord, ":", err.Error())
-				result.BlobPNG = nil
-			}
-			request.OutChan <- result
+			t.ProcessRequest(request)
 		}
 	}(c)
 
 	return c
 }
 
-// Renders images as Web Mercator tiles
+// TileRenderer renders images as Web Mercator tiles
 type TileRenderer struct {
 	m  *mapnik.Map
 	mp mapnik.Projection
+}
+
+// Listen starts listening for TileFetchRequests on c.
+// If the channel is closed, it stops.
+func (t *TileRenderer) Listen(c <-chan TileFetchRequest) {
+	for {
+		request, ok := <-c
+		if !ok {
+			// channel closed, we're done
+			return
+		}
+		t.ProcessRequest(request)
+	}
+}
+
+func (t *TileRenderer) ProcessRequest(request TileFetchRequest) {
+	result := TileFetchResult{request.Coord, nil}
+	var err error
+	result.BlobPNG, err = t.RenderTile(request.Coord)
+	if err != nil {
+		log.Println("Error while rendering", request.Coord, ":", err.Error())
+		result.BlobPNG = nil
+	}
+	request.OutChan <- result
 }
 
 func NewTileRenderer(stylesheet string) *TileRenderer {
@@ -93,8 +110,8 @@ func (t *TileRenderer) RenderTileZXY(zoom, x, y uint64) ([]byte, error) {
 	l1 := fromPixelToLL(p1, zoom)
 
 	// Convert to map projection (e.g. mercartor co-ords EPSG:3857)
-	c0 := t.mp.Forward(mapnik.Coord{l0[0], l0[1]})
-	c1 := t.mp.Forward(mapnik.Coord{l1[0], l1[1]})
+	c0 := t.mp.Forward(mapnik.Coord{X: l0[0], Y: l0[1]})
+	c1 := t.mp.Forward(mapnik.Coord{X: l1[0], Y: l1[1]})
 
 	// Bounding box for the Tile
 	t.m.Resize(256, 256)
