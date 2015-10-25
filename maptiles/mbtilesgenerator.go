@@ -83,13 +83,24 @@ func (m *TileDb) readLayers() {
 	}
 }
 
+var layerMx sync.RWMutex
+
 func (m *TileDb) ensureLayer(layer string) {
+	layerMx.RLock()
 	if _, ok := m.layerIds[layer]; !ok {
+		layerMx.RUnlock()
+		layerMx.Lock()
+		defer layerMx.Unlock()
+		if _, ok := m.layerIds[layer]; ok {
+			return
+		}
 		if _, err := m.db.Exec("INSERT OR IGNORE INTO layers(layer_name) VALUES(?)", layer); err != nil {
 			log.Println(err)
 		}
 		m.readLayers()
+		return
 	}
+	layerMx.RUnlock()
 }
 
 func (m *TileDb) Close() {
@@ -139,6 +150,131 @@ func (m *TileDb) Run() {
 		}
 		m.qc <- true
 	}()
+}
+
+type batchBlob struct {
+	data     []byte
+	checksum string
+}
+
+type batchTile struct {
+	layerID int
+	z       uint64
+	x       uint64
+	y       uint64
+	s       string
+}
+
+// maximum length of inserts is 199 due to SQLITE_MAX_VARIABLE_NUMBER being 999
+func (m *TileDb) BatchInsert(inserts []TileFetchResult) {
+	m.dbLock.Lock()
+	defer m.dbLock.Unlock()
+
+	tiles := make([]batchTile, 0)
+	blobs := make([]batchBlob, 0)
+
+	var tilesMx sync.Mutex
+	var blobsMx sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(len(inserts))
+
+	tileSql := "REPLACE INTO layered_tiles VALUES" // VALUES(?, ?, ?, ?, ?) m.layerIds[l], z, x, y, s
+	blobSql := "REPLACE INTO tile_blobs VALUES"    // VALUES(?,?) checksum, blob
+
+	for idx := range inserts {
+		i := &inserts[idx]
+		go func() {
+			defer wg.Done()
+			i.Coord.setTMS(true)
+			x, y, z, l := i.Coord.X, i.Coord.Y, i.Coord.Zoom, i.Coord.Layer
+			if l == "" {
+				l = "default"
+			}
+			m.ensureLayer(l)
+			s := fmt.Sprintf("%x", md5.Sum(i.BlobPNG))
+
+			tilesMx.Lock()
+			tiles = append(tiles, batchTile{
+				layerID: m.layerIds[l],
+				z:       z,
+				x:       x,
+				y:       y,
+				s:       s,
+			})
+			tilesMx.Unlock()
+
+			row := m.db.QueryRow("SELECT 1 FROM tile_blobs WHERE checksum=?", s)
+			var dummy uint64
+			err := row.Scan(&dummy)
+			switch {
+			case err == sql.ErrNoRows:
+				blobsMx.Lock()
+				defer blobsMx.Unlock()
+				blobs = append(blobs, batchBlob{
+					data:     i.BlobPNG,
+					checksum: s,
+				})
+				return
+			case err != nil:
+				log.Println("error during test", err)
+				return
+			default:
+				//log.Println("Reusing blob", s)
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	first := true
+	args := make([]interface{}, 0, 2*len(blobs))
+	for idx := range blobs {
+		if first {
+			first = false
+		} else {
+			blobSql += ","
+		}
+		blobSql += "(?, ?)"
+		blob := &blobs[idx]
+		args = append(args, blob.checksum, blob.data)
+	}
+
+	blobStatement, err := m.db.Prepare(blobSql + ";")
+	if err != nil {
+		log.Println("error during blob statement preparation", err)
+		return
+	}
+
+	_, err = blobStatement.Exec(args...)
+	if err != nil {
+		log.Println("error inserting blobs", err)
+		return
+	}
+
+	first = true
+	args = make([]interface{}, 0, 5*len(blobs))
+	for idx := range tiles {
+		if first {
+			first = false
+		} else {
+			tileSql += ","
+		}
+		tileSql += "(?, ?, ?, ?, ?)" // m.layerIds[l], z, x, y, s
+		tile := &tiles[idx]
+		args = append(args, tile.layerID, tile.z, tile.x, tile.y, tile.s)
+	}
+
+	tileStatement, err := m.db.Prepare(tileSql + ";")
+	if err != nil {
+		log.Println("error during tile statement preparation", err)
+		return
+	}
+
+	_, err = tileStatement.Exec(args...)
+	if err != nil {
+		log.Println("error inserting tiles", err)
+		return
+	}
 }
 
 func (m *TileDb) insert(i TileFetchResult) {
