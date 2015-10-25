@@ -245,6 +245,7 @@ func (m *TileDb) BatchInsert(inserts []TileFetchResult) {
 			log.Println("error during blob statement preparation", err)
 			return
 		}
+		defer blobStatement.Close()
 
 		_, err = blobStatement.Exec(args...)
 		if err != nil {
@@ -271,6 +272,7 @@ func (m *TileDb) BatchInsert(inserts []TileFetchResult) {
 		log.Println("error during tile statement preparation", err)
 		return
 	}
+	defer tileStatement.Close()
 
 	_, err = tileStatement.Exec(args...)
 	if err != nil {
