@@ -6,7 +6,7 @@ import (
 )
 
 type LayerMultiplex struct {
-	layerChans   map[string]chan<- TileFetchRequest
+	layerChans   map[string]chan<- FetchRequest
 	numRenderers int
 }
 
@@ -15,7 +15,7 @@ func NewLayerMultiplex(numRenderers int) *LayerMultiplex {
 		numRenderers = runtime.GOMAXPROCS(0)
 	}
 	l := LayerMultiplex{
-		layerChans:   make(map[string]chan<- TileFetchRequest),
+		layerChans:   make(map[string]chan<- FetchRequest),
 		numRenderers: numRenderers,
 	}
 	return &l
@@ -29,8 +29,8 @@ func DefaultRenderMultiplex(defaultStylesheet string, numRenderers int) *LayerMu
 	return l
 }
 
-func (l *LayerMultiplex) CreateRenderer(stylesheet string) chan<- TileFetchRequest {
-	c := make(chan TileFetchRequest)
+func (l *LayerMultiplex) CreateRenderer(stylesheet string) chan<- FetchRequest {
+	c := make(chan FetchRequest)
 	for i := 0; i < l.numRenderers; i++ {
 		renderer := NewTileRenderer(stylesheet)
 		go renderer.Listen(c)
@@ -43,16 +43,16 @@ func (l *LayerMultiplex) AddRenderer(name string, stylesheet string) {
 	l.AddSource(name, l.CreateRenderer(stylesheet))
 }
 
-func (l *LayerMultiplex) AddSource(name string, fetchChan chan<- TileFetchRequest) {
+func (l *LayerMultiplex) AddSource(name string, fetchChan chan<- FetchRequest) {
 	l.layerChans[name] = fetchChan
 }
 
-func (l LayerMultiplex) SubmitRequest(r TileFetchRequest) bool {
-	c, ok := l.layerChans[r.Coord.Layer]
+func (l LayerMultiplex) SubmitRequest(r FetchRequest) bool {
+	c, ok := l.layerChans[r.GetLayer()]
 	if ok {
 		c <- r
 	} else {
-		log.Println("No such layer", r.Coord.Layer)
+		log.Println("No such layer", r.GetLayer())
 	}
 	return ok
 }

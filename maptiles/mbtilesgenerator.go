@@ -39,6 +39,7 @@ func NewTileDb(path string) *TileDb {
 		"CREATE TABLE IF NOT EXISTS layered_tiles (layer_id integer, zoom_level integer, tile_column integer, tile_row integer, checksum text, PRIMARY KEY (layer_id, zoom_level, tile_column, tile_row) FOREIGN KEY(checksum) REFERENCES tile_blobs(checksum))",
 		"CREATE TABLE IF NOT EXISTS tile_blobs (checksum text, tile_data blob)",
 		"CREATE VIEW IF NOT EXISTS tiles AS SELECT layered_tiles.zoom_level as zoom_level, layered_tiles.tile_column as tile_column, layered_tiles.tile_row as tile_row, (SELECT tile_data FROM tile_blobs WHERE checksum=layered_tiles.checksum) as tile_data FROM layered_tiles WHERE layered_tiles.layer_id = (SELECT rowid FROM layers WHERE layer_name='default')",
+		"CREATE UNIQUE INDEX IF NOT EXISTS tile_blobs_checksum ON tile_blobs(checksum)",
 		"REPLACE INTO metadata VALUES('name', 'go-mapnik cache file')",
 		"REPLACE INTO metadata VALUES('type', 'overlay')",
 		"REPLACE INTO metadata VALUES('version', '0')",
@@ -332,15 +333,16 @@ func (m *TileDb) BatchCheck(coords []TileCoord) []bool {
 				AND tile_row=?
 				AND layer_id=(SELECT rowid FROM layers WHERE layer_name=?)
 		)`
+
+	m.dbLock.RLock()
+	defer m.dbLock.RUnlock()
+
 	selectStatement, err := m.db.Prepare(queryString)
 	if err != nil {
 		log.Println("error during select statement preparation", err)
 		return nil
 	}
 	defer selectStatement.Close()
-
-	m.dbLock.RLock()
-	defer m.dbLock.RUnlock()
 
 	results := make([]bool, len(coords))
 	for i, coord := range coords {
