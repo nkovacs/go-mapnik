@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 
 	_ "github.com/mattn/go-sqlite3"
 	//"net/http"
@@ -19,6 +20,7 @@ type TileDb struct {
 	insertChan  chan TileFetchResult
 	layerIds    map[string]int
 	qc          chan bool
+	dbLock      sync.RWMutex
 }
 
 func NewTileDb(path string) *TileDb {
@@ -140,6 +142,8 @@ func (m *TileDb) Run() {
 }
 
 func (m *TileDb) insert(i TileFetchResult) {
+	m.dbLock.Lock()
+	defer m.dbLock.Unlock()
 	i.Coord.setTMS(true)
 	x, y, z, l := i.Coord.X, i.Coord.Y, i.Coord.Zoom, i.Coord.Layer
 	if l == "" {
@@ -175,6 +179,8 @@ func (m *TileDb) insert(i TileFetchResult) {
 }
 
 func (m *TileDb) fetch(r TileFetchRequest) {
+	m.dbLock.RLock()
+	defer m.dbLock.RUnlock()
 	r.Coord.setTMS(true)
 	zoom, x, y, l := r.Coord.Zoom, r.Coord.X, r.Coord.Y, r.Coord.Layer
 	if l == "" {
