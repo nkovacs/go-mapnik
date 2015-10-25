@@ -226,33 +226,35 @@ func (m *TileDb) BatchInsert(inserts []TileFetchResult) {
 
 	wg.Wait()
 
-	first := true
-	args := make([]interface{}, 0, 2*len(blobs))
-	for idx := range blobs {
-		if first {
-			first = false
-		} else {
-			blobSql += ","
+	if len(blobs) > 0 {
+		first := true
+		args := make([]interface{}, 0, 2*len(blobs))
+		for idx := range blobs {
+			if first {
+				first = false
+			} else {
+				blobSql += ","
+			}
+			blobSql += "(?, ?)"
+			blob := &blobs[idx]
+			args = append(args, blob.checksum, blob.data)
 		}
-		blobSql += "(?, ?)"
-		blob := &blobs[idx]
-		args = append(args, blob.checksum, blob.data)
+
+		blobStatement, err := m.db.Prepare(blobSql + ";")
+		if err != nil {
+			log.Println("error during blob statement preparation", err)
+			return
+		}
+
+		_, err = blobStatement.Exec(args...)
+		if err != nil {
+			log.Println("error inserting blobs", err)
+			return
+		}
 	}
 
-	blobStatement, err := m.db.Prepare(blobSql + ";")
-	if err != nil {
-		log.Println("error during blob statement preparation", err)
-		return
-	}
-
-	_, err = blobStatement.Exec(args...)
-	if err != nil {
-		log.Println("error inserting blobs", err)
-		return
-	}
-
-	first = true
-	args = make([]interface{}, 0, 5*len(blobs))
+	first := true
+	args := make([]interface{}, 0, 5*len(blobs))
 	for idx := range tiles {
 		if first {
 			first = false
