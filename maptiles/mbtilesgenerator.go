@@ -31,6 +31,7 @@ func NewTileDb(path string) *TileDb {
 	}
 	queries := []string{
 		"PRAGMA journal_mode = OFF",
+		"PRAGMA synchronous=OFF",
 		"CREATE TABLE IF NOT EXISTS layers(layer_name text PRIMARY KEY NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS metadata (name text PRIMARY KEY NOT NULL, value text NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS layered_tiles (layer_id integer, zoom_level integer, tile_column integer, tile_row integer, checksum text, PRIMARY KEY (layer_id, zoom_level, tile_column, tile_row) FOREIGN KEY(checksum) REFERENCES tile_blobs(checksum))",
@@ -57,7 +58,7 @@ func NewTileDb(path string) *TileDb {
 
 	m.insertChan = make(chan TileFetchResult)
 	m.requestChan = make(chan TileFetchRequest)
-	go m.Run()
+	m.Run()
 	return &m
 }
 
@@ -112,28 +113,30 @@ func (m TileDb) RequestQueue() chan<- TileFetchRequest {
 // Best executed in a dedicated go routine.
 func (m *TileDb) Run() {
 	m.qc = make(chan bool)
-	requestClosed := false
-	insertClosed := false
-	for {
-		select {
-		case r, ok := <-m.requestChan:
-			if !ok {
-				requestClosed = true
-			} else {
-				m.fetch(r)
+	go func() {
+		requestClosed := false
+		insertClosed := false
+		for {
+			select {
+			case r, ok := <-m.requestChan:
+				if !ok {
+					requestClosed = true
+				} else {
+					go m.fetch(r)
+				}
+			case i, ok := <-m.insertChan:
+				if !ok {
+					insertClosed = true
+				} else {
+					go m.insert(i)
+				}
 			}
-		case i, ok := <-m.insertChan:
-			if !ok {
-				insertClosed = true
-			} else {
-				m.insert(i)
+			if requestClosed && insertClosed {
+				break
 			}
 		}
-		if requestClosed && insertClosed {
-			break
-		}
-	}
-	m.qc <- true
+		m.qc <- true
+	}()
 }
 
 func (m *TileDb) insert(i TileFetchResult) {
