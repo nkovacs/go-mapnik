@@ -104,11 +104,11 @@ func (m *TileDb) Close() {
 
 }
 
-func (m TileDb) InsertQueue() chan<- TileFetchResult {
+func (m *TileDb) InsertQueue() chan<- TileFetchResult {
 	return m.insertChan
 }
 
-func (m TileDb) RequestQueue() chan<- TileFetchRequest {
+func (m *TileDb) RequestQueue() chan<- TileFetchRequest {
 	return m.requestChan
 }
 
