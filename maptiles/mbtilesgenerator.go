@@ -177,7 +177,7 @@ func (m *TileDb) fetch(r TileFetchRequest) {
 	if l == "" {
 		l = "default"
 	}
-	result := TileFetchResult{r.Coord, nil}
+	result := TileFetchResult{r.Coord, nil, nil}
 	queryString := `
 		SELECT tile_data 
 		FROM tile_blobs 
@@ -197,6 +197,7 @@ func (m *TileDb) fetch(r TileFetchRequest) {
 		result.BlobPNG = nil
 	case err != nil:
 		log.Println(err)
+		result.Error = err
 	default:
 		result.BlobPNG = blob
 	}

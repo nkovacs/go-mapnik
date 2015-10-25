@@ -20,6 +20,7 @@ func (c TileCoord) OSMFilename() string {
 type TileFetchResult struct {
 	Coord   TileCoord
 	BlobPNG []byte
+	Error   error
 }
 
 type TileFetchRequest struct {
@@ -67,12 +68,13 @@ func (t *TileRenderer) Listen(c <-chan TileFetchRequest) {
 }
 
 func (t *TileRenderer) ProcessRequest(request TileFetchRequest) {
-	result := TileFetchResult{request.Coord, nil}
+	result := TileFetchResult{request.Coord, nil, nil}
 	var err error
 	result.BlobPNG, err = t.RenderTile(request.Coord)
 	if err != nil {
 		log.Println("Error while rendering", request.Coord, ":", err.Error())
 		result.BlobPNG = nil
+		result.Error = err
 	}
 	request.OutChan <- result
 }
