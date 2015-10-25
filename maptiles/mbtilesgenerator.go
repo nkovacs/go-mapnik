@@ -318,6 +318,54 @@ func (m *TileDb) insert(i TileFetchResult) {
 	}
 }
 
+// BatchCheck checks whether the provided coordinates have tiles in the database.
+func (m *TileDb) BatchCheck(coords []TileCoord) []bool {
+
+	queryString := `
+		SELECT 1
+		FROM tile_blobs
+		WHERE checksum=(
+			SELECT checksum
+			FROM layered_tiles
+			WHERE zoom_level=?
+				AND tile_column=?
+				AND tile_row=?
+				AND layer_id=(SELECT rowid FROM layers WHERE layer_name=?)
+		)`
+	selectStatement, err := m.db.Prepare(queryString)
+	if err != nil {
+		log.Println("error during select statement preparation", err)
+		return nil
+	}
+	defer selectStatement.Close()
+
+	m.dbLock.RLock()
+	defer m.dbLock.RUnlock()
+
+	results := make([]bool, len(coords))
+	for i, coord := range coords {
+		coord.setTMS(true)
+		l := coord.Layer
+		if l == "" {
+			l = "default"
+		}
+		row := selectStatement.QueryRow(coord.Zoom, coord.X, coord.Y, l)
+		var dummy uint64
+		err := row.Scan(&dummy)
+		switch {
+		case err == sql.ErrNoRows:
+			results[i] = false
+		case err != nil:
+			log.Println(err)
+			results[i] = false
+		default:
+			results[i] = true
+		}
+	}
+
+	return results
+}
+
 func (m *TileDb) fetch(r TileFetchRequest) {
 	m.dbLock.RLock()
 	defer m.dbLock.RUnlock()
